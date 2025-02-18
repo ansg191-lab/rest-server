@@ -22,7 +22,7 @@ import (
 type restServerApp struct {
 	CmdRoot    *cobra.Command
 	Server     restserver.Server
-	CpuProfile string
+	CPUProfile string
 
 	listenerAddressMu sync.Mutex
 	listenerAddress   net.Addr // set after startup
@@ -36,7 +36,7 @@ func newRestServerApp() *restServerApp {
 			Short:         "Run a REST server for use with restic",
 			SilenceErrors: true,
 			SilenceUsage:  true,
-			Args: func(cmd *cobra.Command, args []string) error {
+			Args: func(_ *cobra.Command, args []string) error {
 				if len(args) != 0 {
 					return fmt.Errorf("rest-server expects no arguments - unknown argument: %s", args[0])
 				}
@@ -52,7 +52,7 @@ func newRestServerApp() *restServerApp {
 	rv.CmdRoot.RunE = rv.runRoot
 	flags := rv.CmdRoot.Flags()
 
-	flags.StringVar(&rv.CpuProfile, "cpu-profile", rv.CpuProfile, "write CPU profile to file")
+	flags.StringVar(&rv.CPUProfile, "cpu-profile", rv.CPUProfile, "write CPU profile to file")
 	flags.BoolVar(&rv.Server.Debug, "debug", rv.Server.Debug, "output debug messages")
 	flags.StringVar(&rv.Server.Listen, "listen", rv.Server.Listen, "listen address")
 	flags.StringVar(&rv.Server.Log, "log", rv.Server.Log, "write HTTP requests in the combined log format to the specified `filename` (use \"-\" for logging to stdout)")
@@ -69,6 +69,7 @@ func newRestServerApp() *restServerApp {
 	flags.BoolVar(&rv.Server.PrivateRepos, "private-repos", rv.Server.PrivateRepos, "users can only access their private repo")
 	flags.BoolVar(&rv.Server.Prometheus, "prometheus", rv.Server.Prometheus, "enable Prometheus metrics")
 	flags.BoolVar(&rv.Server.PrometheusNoAuth, "prometheus-no-auth", rv.Server.PrometheusNoAuth, "disable auth for Prometheus /metrics endpoint")
+	flags.BoolVar(&rv.Server.GroupAccessibleRepos, "group-accessible-repos", rv.Server.GroupAccessibleRepos, "let filesystem group be able to access repo files")
 
 	// Ldap Options
 	flags.StringVar(&rv.Server.LdapAddr, "ldap-addr", rv.Server.LdapAddr, "ldap server address")
@@ -108,17 +109,19 @@ func (app *restServerApp) ListenerAddress() net.Addr {
 	return app.listenerAddress
 }
 
-func (app *restServerApp) runRoot(cmd *cobra.Command, args []string) error {
+func (app *restServerApp) runRoot(_ *cobra.Command, _ []string) error {
 	log.SetFlags(0)
 
 	log.Printf("Data directory: %s", app.Server.Path)
 
-	if app.CpuProfile != "" {
-		f, err := os.Create(app.CpuProfile)
+	if app.CPUProfile != "" {
+		f, err := os.Create(app.CPUProfile)
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() {
+			_ = f.Close()
+		}()
 
 		if err := pprof.StartCPUProfile(f); err != nil {
 			return err
@@ -150,6 +153,12 @@ func (app *restServerApp) runRoot(cmd *cobra.Command, args []string) error {
 		log.Println("Private repositories enabled")
 	} else {
 		log.Println("Private repositories disabled")
+	}
+
+	if app.Server.GroupAccessibleRepos {
+		log.Println("Group accessible repos enabled")
+	} else {
+		log.Println("Group accessible repos disabled")
 	}
 
 	enabledTLS, privateKey, publicKey, err := app.tlsSettings()
